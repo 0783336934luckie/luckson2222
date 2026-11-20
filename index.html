@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuroTrack</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="engine.js"></script>
+<style>
+/* Layout idea: a clinical worklist. Fixed left rail of screens, one working pane, state shown by coloured stripes. */
+:root {
+  --bg: #f4f6f6;
+  --surface: #ffffff;
+  --ink: #15262b;
+  --muted: #5b6e73;
+  --line: #d9e1e2;
+  --accent: #0b6e72;
+  --accent-soft: #e2f1f1;
+  --green: #2e7d32; --amber: #c98a00; --orange: #d0631a; --red: #c62828; --purple: #6a1b9a;
+  --font-body: "IBM Plex Sans", "IBM Plex Sans Arabic", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-ar: "IBM Plex Sans Arabic", "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1719; --surface: #162124; --ink: #e3ecec; --muted: #9cb0b3; --line: #2a3a3d;
+    --accent: #4fc3c7; --accent-soft: #163a3c;
+    --green: #66bb6a; --amber: #e0b23a; --orange: #f08a4b; --red: #ef6461; --purple: #b585e0;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1719; --surface: #162124; --ink: #e3ecec; --muted: #9cb0b3; --line: #2a3a3d;
+  --accent: #4fc3c7; --accent-soft: #163a3c;
+  --green: #66bb6a; --amber: #e0b23a; --orange: #f08a4b; --red: #ef6461; --purple: #b585e0;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font-body); }
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.2; }
+h1 { font-size: 26px; font-weight: 700; }
+h2 { font-size: 18px; font-weight: 600; }
+h3 { font-size: 15px; font-weight: 600; }
+p { margin: 0; max-width: 72ch; }
+a { color: var(--accent); }
+button, select, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+.app { display: grid; grid-template-columns: 232px 1fr; min-height: 100%; }
+.rail { background: var(--surface); border-right: 1px solid var(--line); padding: 20px 14px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.brand { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.brand b { font-size: 20px; letter-spacing: -0.01em; }
+.brand span { color: var(--muted); font-size: 12.5px; }
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a { text-decoration: none; color: var(--ink); padding: 8px 10px; border-radius: 6px; font-size: 14px; display: flex; gap: 10px; align-items: baseline; }
+.nav a small { font-family: var(--font-mono); color: var(--muted); font-size: 11px; min-width: 16px; }
+.nav a:hover { background: var(--accent-soft); }
+.nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.lang { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; }
+.lang label.t { font-size: 12px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; width: fit-content; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--surface); }
+.note { margin: 0 8px; padding: 10px 12px; border-radius: 6px; background: color-mix(in srgb, var(--amber) 14%, var(--surface)); color: var(--ink); font-size: 12.5px; border-left: 3px solid var(--amber); }
+
+main { padding: 28px clamp(16px, 3vw, 40px) 60px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
+.view { display: none; flex-direction: column; gap: 22px; }
+.view.on { display: flex; }
+.lead { color: var(--muted); font-size: 15.5px; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.grid { display: grid; gap: 16px; }
+.g2 { grid-template-columns: 3fr 2fr; }
+.g3 { grid-template-columns: repeat(3, 1fr); }
+.g4 { grid-template-columns: repeat(4, 1fr); }
+.g5 { grid-template-columns: repeat(5, 1fr); }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.tile .k { color: var(--muted); font-size: 12.5px; }
+.tile .v { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .d { font-size: 12.5px; color: var(--green); }
+.step b { display: block; font-size: 13px; color: var(--accent); font-family: var(--font-mono); }
+.step p { font-size: 13.5px; color: var(--muted); }
+.stripe { border-left: 5px solid var(--c, var(--line)); padding: 4px 0 4px 10px; }
+.stripe .ar { font-family: var(--font-ar); direction: rtl; color: var(--muted); font-size: 13.5px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label { font-size: 12.5px; color: var(--muted); }
+select, input[type="number"], input[type="text"] { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; min-width: 0; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 13px; background: var(--bg); }
+.chip b { font-weight: 600; }
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12.5px; font-weight: 600; color: #fff; background: var(--c, var(--muted)); white-space: nowrap; }
+.consent { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13.5px; }
+.consent label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.btn { text-decoration: none; display: inline-block; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); padding: 8px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.btn.ghost { background: transparent; color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: default; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; font-size: 12.5px; white-space: nowrap; position: sticky; top: 0; background: var(--surface); }
+td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+tr.sel td { background: var(--accent-soft); }
+tbody tr.click { cursor: pointer; }
+tbody tr.click:hover td { background: var(--accent-soft); }
+.report { display: flex; flex-direction: column; gap: 10px; }
+.report[dir="rtl"] { font-family: var(--font-ar); text-align: right; }
+.report .head { font-size: 19px; font-weight: 600; }
+.report ul { margin: 0; padding-inline-start: 20px; display: flex; flex-direction: column; gap: 4px; }
+.report .disc { font-size: 12.5px; color: var(--muted); font-style: italic; }
+.held { padding: 12px 14px; border-radius: 8px; background: var(--accent-soft); color: var(--ink); }
+.ok { padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--green) 14%, var(--surface)); }
+.warn { padding: 12px 14px; border-radius: 8px; background: color-mix(in srgb, var(--amber) 16%, var(--surface)); border-left: 3px solid var(--amber); }
+.result { border-left: 8px solid var(--c); padding: 10px 14px; background: var(--bg); border-radius: 6px; font-size: 16px; }
+.plot { width: 100%; min-height: 340px; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.task-words { font-size: 24px; font-weight: 600; letter-spacing: .02em; }
+.task-words.ar { font-family: var(--font-ar); direction: rtl; }
+.symbols { font-size: 30px; letter-spacing: .3em; font-family: var(--font-mono); }
+.opts { display: flex; flex-wrap: wrap; gap: 8px; }
+.opts label { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; display: inline-flex; gap: 6px; align-items: center; }
+.opts.ar { direction: rtl; font-family: var(--font-ar); }
+.loading { padding: 40px; color: var(--muted); }
+.docview { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: start; }
+.toc { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 2px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.toc button { text-align: left; border: 0; background: transparent; padding: 6px 8px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; font-size: 13.5px; }
+.toc button span { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.toc button:hover, .toc button.on { background: var(--accent-soft); color: var(--accent); }
+.doc { padding: clamp(18px, 3vw, 40px); gap: 0; display: block; }
+.doc h2 { font-size: 22px; margin: 36px 0 10px; padding-top: 14px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+.doc h2:first-child { margin-top: 0; border-top: 0; padding-top: 0; }
+.doc h3 { margin: 20px 0 8px; }
+.doc p, .doc li { max-width: 74ch; margin: 0 0 10px; line-height: 1.6; }
+.doc ul, .doc ol { padding-left: 22px; margin: 0 0 12px; }
+.doc table { margin: 12px 0 18px; display: block; overflow-x: auto; }
+.doc th { background: var(--accent-soft); color: var(--ink); }
+.doc code { font: 13px var(--font-mono); background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+.doc pre { background: #10201f; color: #d8eeee; padding: 14px 16px; border-radius: 8px; overflow-x: auto; }
+.doc pre code { background: none; color: inherit; padding: 0; }
+.doc blockquote { margin: 14px 0; padding: 12px 16px; border-left: 4px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; }
+.doc figure { margin: 20px 0; }
+.doc figure img { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.doc figcaption { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.pagebar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pageframe { background: #e9eded; border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: flex; justify-content: center; }
+.pageframe img { width: 100%; max-width: 820px; height: auto; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.12); border-radius: 2px; }
+.thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 8px; }
+.thumbs button { border: 2px solid transparent; padding: 0; background: #fff; cursor: pointer; border-radius: 3px; flex: 0 0 auto; }
+.thumbs button.on { border-color: var(--accent); }
+.thumbs img { display: block; width: 64px; height: auto; }
+@media (max-width: 860px) { .docview { grid-template-columns: 1fr; } .toc { position: static; max-height: none; flex-direction: row; flex-wrap: wrap; } }
+.filters { position: sticky; top: 0; z-index: 5; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); padding: 10px 0; display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; border-bottom: 1px solid var(--line); }
+.clock { display: flex; gap: 10px; align-items: center; flex: 1 1 340px; }
+.clock input[type="range"] { flex: 1; accent-color: var(--accent); }
+.clock .when { font-family: var(--font-mono); font-size: 13px; min-width: 120px; color: var(--ink); }
+.kpis { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+.kpis .tile .v { font-size: 24px; }
+.kpis .tile .s { font-size: 12px; color: var(--muted); }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; vertical-align: middle; }
+.live-dot.on { background: var(--red); animation: pulse 1.2s infinite; }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: .3; } 100% { opacity: 1; } }
+.sl { display: grid; grid-template-columns: minmax(150px, 1.4fr) 2fr 64px; gap: 10px; align-items: center; }
+.sl input[type="range"] { width: 100%; accent-color: var(--accent); }
+.sl output { font-family: var(--font-mono); text-align: right; font-size: 14px; }
+.sl label { font-size: 13px; color: var(--ink); }
+.sl label small { display: block; color: var(--muted); font-size: 11.5px; }
+.sliders { display: flex; flex-direction: column; gap: 10px; }
+.statgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.statgrid .tile .v { font-size: 22px; }
+@media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .kpis { grid-template-columns: repeat(2, 1fr); } .sl { grid-template-columns: 1fr 64px; } .sl input[type="range"] { grid-column: 1 / -1; } }
+@media (max-width: 1100px) { .g5 { grid-template-columns: repeat(3, 1fr); } .g4 { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 860px) {
+  .app { grid-template-columns: 1fr; }
+  .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nav { flex-direction: row; flex-wrap: wrap; }
+  .g2, .g3 { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) { .g4, .g5 { grid-template-columns: 1fr 1fr; } h1 { font-size: 22px; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><b>NeuroTrack</b><span>Protecting brain health earlier · prototype</span></div>
+    <nav class="nav" id="nav" aria-label="Screens">
+      <a href="#overview"><small>01</small>Overview</a>
+      <a href="#dashboard"><small>02</small>Programme dashboard</a>
+      <a href="#journey"><small>03</small>Participant journey</a>
+      <a href="#entry"><small>04</small>Live session scoring</a>
+      <a href="#try"><small>05</small>Try the assessment</a>
+      <a href="#queue"><small>06</small>Clinician review queue</a>
+      <a href="#validation"><small>07</small>Validation &amp; fairness</a>
+      <a href="#safety"><small>08</small>Safety &amp; governance</a>
+      <a href="#guide"><small>09</small>How to use this app</a>
+      <a href="#docs"><small>10</small>Technical documentation</a>
+    </nav>
+    <div class="lang">
+      <label class="t" id="lang-label">Report language / لغة التقرير</label>
+      <div class="seg" role="group" aria-labelledby="lang-label">
+        <button type="button" id="lang-en" aria-pressed="true">English</button>
+        <button type="button" id="lang-ar" aria-pressed="false" style="font-family:var(--font-ar)">العربية</button>
+      </div>
+    </div>
+    <p class="note">All participants are synthetic. Research prototype, not for clinical use.</p>
+  </aside>
+
+  <main id="main">
+    <div class="loading" id="loading">Loading the synthetic cohort and models…</div>
+
+    <!-- 01 Overview -->
+    <section class="view" id="v-overview">
+      <h1>NeuroTrack: brain health, measured against your own baseline</h1>
+      <p class="lead">A short cognitive and functional check, adapted to the person's language and culture, repeated over time. Each person is compared with their own two-session baseline and with people like them in age, education, language, digital familiarity, hearing and vision. Change is confirmed with a repeat test before anyone is referred, and results link to the risk factors the person has agreed to share.</p>
+      <p class="held">New here? Take the <a href="#guide">five-minute tour</a>, or go straight to the <a href="#dashboard">programme dashboard</a> and press Play.</p>
+      <div class="grid g4" id="ov-tiles"></div>
+      <p class="small muted">Held-out synthetic test cohort, n = 1,000, 3-year follow-up. Comparison is with a once-a-year screen using demographically adjusted norms.</p>
+      <div class="card">
+        <h2>How it works</h2>
+        <div class="grid g5">
+          <div class="step"><b>1 · Assess</b><p>10-minute tablet or assisted check in Arabic or English: word recall, symbol–digit, sequencing, category fluency, daily function, mood and sleep.</p></div>
+          <div class="step"><b>2 · Baseline</b><p>Two sessions about 2 weeks apart form a personal baseline and measure reliability.</p></div>
+          <div class="step"><b>3 · Detect change</b><p>Regression-based change scores adjust for practice, age, education, language and time.</p></div>
+          <div class="step"><b>4 · Confirm and triage</b><p>A flag triggers a repeat test. Only a change that persists is referred, and clinicians review every referral first.</p></div>
+          <div class="step"><b>5 · Act</b><p>Plain-language Arabic or English report: top modifiable factors, treatable causes to check and the right service.</p></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Triage levels</h2>
+        <div class="grid g5" id="ov-levels"></div>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section class="view" id="v-dashboard">
+      <h1>Programme dashboard</h1>
+      <p class="lead">A view of the whole screening programme for its managers, built from the held-out synthetic cohort of 1,000 people. Press Play to run three years of the programme month by month, or drag the timeline. Filters apply to every panel.</p>
+      <div class="filters">
+        <div class="field"><label for="f-lang">Language</label><select id="f-lang"><option value="">All</option><option>Arabic</option><option>English</option></select></div>
+        <div class="field"><label for="f-age">Age band</label><select id="f-age"><option value="">All</option><option>50-64</option><option>65-74</option><option>75+</option></select></div>
+        <div class="field"><label for="f-edu">Education</label><select id="f-edu"><option value="">All</option><option>0-6 yrs</option><option>7-12 yrs</option><option>13+ yrs</option></select></div>
+        <div class="field"><label for="f-dig">Digital familiarity</label><select id="f-dig"><option value="">All</option><option value="0">Low</option><option value="1">Medium</option><option value="2">High</option></select></div>
+        <div class="clock">
+          <button class="btn" type="button" id="d-play" aria-label="Play the programme timeline">Play</button>
+          <input type="range" id="d-month" min="0" max="36" step="1" value="36" aria-label="Programme month">
+          <span class="when"><span class="live-dot" id="d-dot"></span><span id="d-when">Month 36</span></span>
+        </div>
+      </div>
+      <div class="kpis" id="d-kpis"></div>
+      <div class="grid g2">
+        <div class="card"><h2>Sessions needing action, by review cycle</h2><div id="d-mix" class="plot" role="img" aria-label="Share of sessions in each triage level by review cycle"></div></div>
+        <div class="card"><h2>Change against baseline across the cohort</h2><div id="d-fan" class="plot" role="img" aria-label="Distribution of composite change scores over time"></div></div>
+      </div>
+      <div class="grid g2">
+        <div class="card"><h2>Where flagged sessions go</h2><div id="d-sankey" class="plot" role="img" aria-label="Flow of assessment sessions from scoring to outcome"></div><p class="small muted" id="d-sankey-note">Follow-up sessions to date. Most first flags are resolved by the repeat test and never become referrals.</p></div>
+        <div class="card"><h2>Risk factors: referred vs not referred</h2><div id="d-risk" class="plot" role="img" aria-label="Prevalence of modifiable risk factors by referral status"></div></div>
+      </div>
+      <div class="card"><h2>New referrals per 100 people, by group and review cycle</h2><div id="d-heat" class="plot" style="min-height:380px" role="img" aria-label="Heatmap of referral rates"></div><p class="small muted">All participants, unfiltered. Cycles after the current month are left blank.</p></div>
+      <div class="card">
+        <h2>Threshold explorer</h2>
+        <p class="muted">What if referral relied on a single low score instead of a confirmed change? Drag the cut-off and compare. Uses the full 3 years of follow-up and the current filters.</p>
+        <div class="sl"><label for="d-thr">Single-visit cut-off<small>refer at the first follow-up with composite change z at or below this</small></label><input type="range" id="d-thr" min="-4" max="-0.5" step="0.05" value="-1.5"><output id="d-thr-o" for="d-thr">−1.50</output></div>
+        <div class="grid g2">
+          <div id="d-roc" class="plot" role="img" aria-label="ROC curve with the current operating point"></div>
+          <div class="statgrid" id="d-thr-stats"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 Journey -->
+    <section class="view" id="v-journey">
+      <h1>Participant journey</h1>
+      <div class="row" id="pick-journey"></div>
+      <div class="chips" id="j-profile"></div>
+      <div class="card">
+        <h3>Data-sharing consent <span class="muted small">(the risk context uses only what is ticked)</span></h3>
+        <div class="consent" id="j-consent"></div>
+      </div>
+      <div class="grid g2">
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h2>Change against personal baseline</h2>
+            <label class="toggle"><input type="checkbox" id="j-domains"> Show individual domains</label>
+          </div>
+          <div id="j-plot" class="plot" role="img" aria-label="Composite change score over time with triage markers"></div>
+          <h3>Domain profile at the selected visit</h3>
+          <div id="j-radar" class="plot" style="min-height:300px" role="img" aria-label="Change by domain at the selected visit"></div>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h2 id="j-report-title">Report</h2>
+            <label class="toggle"><input type="checkbox" id="j-clin"> View as clinician</label>
+          </div>
+          <div class="field"><label for="j-visit">Visit</label><select id="j-visit"></select></div>
+          <div id="j-report"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Visit history</h2>
+        <div class="tablewrap"><table id="j-table"></table></div>
+      </div>
+      <div class="card">
+        <h2>Integrated risk context</h2>
+        <div class="grid g3" id="j-risk"></div>
+      </div>
+    </section>
+
+    <!-- 03 Entry -->
+    <section class="view" id="v-entry">
+      <h1>Live session scoring</h1>
+      <p class="lead">Drag any slider and the session is re-scored instantly in your browser, using the same coefficients as the Python prototype. Try lowering recall, or raising the PHQ-9 mood score, and watch the triage decision change.</p>
+      <div class="row" id="pick-entry"></div>
+      <p class="small muted" id="e-base"></p>
+      <div class="grid g2">
+        <form class="card" id="e-form">
+          <h2>Session inputs</h2>
+          <div class="sliders" id="e-sliders"></div>
+          <div class="row"><button class="btn ghost" type="button" id="e-reset">Reset to baseline</button><button class="btn ghost" type="button" id="e-mood">Simulate a low-mood day</button><button class="btn ghost" type="button" id="e-decline">Simulate decline</button></div>
+        </form>
+        <div id="e-out"></div>
+      </div>
+    </section>
+
+    <!-- 04 Try -->
+    <section class="view" id="v-try">
+      <h1>Try two of the tasks</h1>
+      <p class="lead">For illustration only. The real check uses the full validated battery, with audio prompts and an assisted mode.</p>
+      <div class="row"><div class="field"><label for="t-lang">Task language</label><select id="t-lang"><option value="en">English</option><option value="ar">العربية</option></select></div></div>
+      <div class="grid g2">
+        <div class="card" id="t-recall"></div>
+        <div class="card" id="t-sd"></div>
+      </div>
+    </section>
+
+    <!-- 05 Queue -->
+    <section class="view" id="v-queue">
+      <h1>Clinician review queue</h1>
+      <p class="lead">Every referral and every mood-related flag waits here for a qualified clinician before the participant sees the result.</p>
+      <div class="row">
+        <div class="field"><label for="q-session">Review cycle</label><select id="q-session"></select></div>
+        <div class="tile" style="min-width:180px"><span class="k">Cases awaiting review</span><span class="v" id="q-count">0</span></div>
+      </div>
+      <div class="card"><div class="tablewrap" style="max-height:420px;overflow-y:auto"><table id="q-table"></table></div><p class="small muted">Select a row to open the case. People already referred at an earlier cycle stay with their care team and do not re-enter the queue.</p></div>
+      <div class="grid g2" id="q-case"></div>
+      <div class="card" id="q-log" hidden><h2>Decision log</h2><div class="tablewrap"><table id="q-logt"></table></div></div>
+    </section>
+
+    <!-- 06 Validation -->
+    <section class="view" id="v-validation">
+      <h1>Validation and local-population performance</h1>
+      <p class="warn">Synthetic data. These numbers show that the validation framework works end to end. They are not evidence of clinical accuracy, which must be measured in a prospective Abu Dhabi study.</p>
+      <p class="lead"><b>Comparators.</b> A: a once-a-year screen with a single unadjusted cut-off. B: a once-a-year screen with demographically adjusted norms. NeuroTrack: personal baseline, regression-based change, confirmatory retest and triage. Held-out test cohort, 3-year follow-up.</p>
+      <div class="card"><h2>Accuracy and referral burden</h2><div class="tablewrap"><table id="val-overall"></table></div></div>
+      <div class="card"><h2>Timeliness</h2><div class="tablewrap"><table id="val-time"></table></div>
+        <p class="small muted">Detection lag is the time from when true decline reached 0.5 SD to referral, after any retest. Time to clinical assessment adds a modelled wait of 28 days for primary care and 14 days for a specialist.</p></div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2>Fairness across language, age and education</h2>
+          <div class="seg" role="group" aria-label="Metric">
+            <button type="button" data-m="false_referrals_per_100" aria-pressed="true">False referrals</button>
+            <button type="button" data-m="sensitivity" aria-pressed="false">Sensitivity</button>
+            <button type="button" data-m="specificity" aria-pressed="false">Specificity</button>
+          </div>
+        </div>
+        <div id="val-plot" class="plot" style="min-height:420px" role="img" aria-label="Metric by subgroup and method"></div>
+        <p class="small muted">The unadjusted cut-off refers too many people with little formal schooling and falsely reassures highly educated people. NeuroTrack keeps error rates similar across groups.</p>
+      </div>
+      <div class="grid g3">
+        <div class="card"><h3>Detecting meaningful change (visit-level AUC)</h3><table id="val-auc"></table></div>
+        <div class="card"><h3>Test–retest reliability, ICC(2,1)</h3><table id="val-icc"></table><h3>Confirmatory retest</h3><table id="val-retest"></table></div>
+        <div class="card"><h3>Completion of scheduled follow-ups</h3><table id="val-comp"></table></div>
+      </div>
+    </section>
+
+    <!-- 07 Safety -->
+    <section class="view" id="v-safety">
+      <h1>Safety, oversight and data governance</h1>
+      <div class="grid g2">
+        <div class="card">
+          <h3>Risk identification, not diagnosis</h3><p>Every output is labelled as a risk signal. Participants never see a diagnostic label such as MCI or dementia.</p>
+          <h3>Human in the loop</h3><p>Primary-care and specialist referrals, and mood-related flags, wait in a clinician queue. They are released only after a decision is recorded: approve, downgrade, escalate or ask for more information. Every decision is logged.</p>
+          <h3>Uncertainty disclosed</h3><p>Reports say how often a change of that size happens in people whose brain health is stable, and why the change is confirmed before anyone acts.</p>
+          <h3>Confounders handled</h3><p>Low mood (PHQ-9 of 10 or more) or very short sleep leads to a wellbeing review and a later repeat, not a neurology referral.</p>
+        </div>
+        <div class="card">
+          <h3>Consent by category</h3><p>Participants choose which data inform their risk context: clinical, wearable, lifestyle, hearing and vision, family and genomic. Genomic results never trigger a referral on their own and come with an offer of genetic counselling.</p>
+          <h3>Transparent rules</h3><p>Every threshold sits in one configuration file that a clinical governance group can review. Each triage decision returns the reasons that produced it.</p>
+          <h3>Data protection</h3><p>Designed around UAE Federal Law No. 2 of 2019 on ICT in Health Fields, which requires confidentiality and in-country storage of health data, and around the Abu Dhabi Healthcare Information and Cyber Security Standard, the DoH Policy on AI in Healthcare and the Malaffi exchange. Data would be hosted in-country, encrypted, pseudonymised for analytics, with role-based access and audit logs. Compliance is to be confirmed with DoH during the pilot.</p>
+          <h3>Fairness monitoring</h3><p>Sensitivity, specificity and false referrals are reported by language, age and education at every model update. Any subgroup drifting outside agreed bounds triggers recalibration.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Guide -->
+    <section class="view" id="v-guide">
+      <h1>How to use this app</h1>
+      <p class="lead">Each walkthrough takes under five minutes. The report-language switch in the left menu changes participant reports between English and Arabic on every screen. All data is synthetic.</p>
+      <div class="grid g2">
+        <div class="card">
+          <h2>Five-minute tour</h2>
+          <ol style="margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px">
+            <li>Read the headline results on <a href="#overview">Overview</a>.</li>
+            <li>Open the <a href="#dashboard">Programme dashboard</a> and press <b>Play</b>. Referrals build up and the two medians in the change chart separate over three years.</li>
+            <li>Set <b>Education</b> to 0–6 yrs, then 13+ yrs. Referral rates stay comparable between groups.</li>
+            <li>In the <b>Threshold explorer</b>, drag the cut-off. A single low score trades missed decliners for false alarms; NeuroTrack's star sits above that curve.</li>
+            <li>On <a href="#journey">Participant journey</a>, choose “Low-mood dip, resolved on retest” and see a flag clear with no referral. Switch the report to Arabic.</li>
+            <li>On <a href="#entry">Live session scoring</a>, press <b>Simulate decline</b>, then <b>Simulate a low-mood day</b>, and compare the decisions.</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h2>Reading the numbers</h2>
+          <table>
+            <tbody>
+              <tr><td style="white-space:nowrap"><b>Change z</b></td><td>Today's score against what was expected from the person's own baseline. 0 means as expected; −1.5 or lower is a possible change.</td></tr>
+              <tr><td style="white-space:nowrap"><b>About N in 100</b></td><td>How many people with stable brain health would score this low by chance. A smaller number is a stronger signal.</td></tr>
+              <tr><td><b>Norm z</b></td><td>The person against others of the same age, education, language and digital familiarity, regardless of history.</td></tr>
+              <tr><td><b>Retest</b></td><td>A repeat check 2–6 weeks after a first flag. Only a change that persists is referred.</td></tr>
+              <tr><td><b>PAF</b></td><td>Population attributable fraction from the Lancet Commission 2024: the share of dementia linked to a factor across a population. Used to rank actions, not to predict one person's risk.</td></tr>
+            </tbody>
+          </table>
+          <div class="grid g5" style="gap:8px">
+            <div class="stripe" style="--c:var(--green)"><b>Stable</b></div>
+            <div class="stripe" style="--c:var(--amber)"><b>Repeat</b></div>
+            <div class="stripe" style="--c:var(--orange)"><b>Wellbeing</b></div>
+            <div class="stripe" style="--c:var(--red)"><b>Primary care</b></div>
+            <div class="stripe" style="--c:var(--purple)"><b>Specialist</b></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid g3">
+        <div class="card"><h3>Programme manager</h3><ol style="margin:0;padding-left:20px"><li>Filter the dashboard to your population.</li><li>Drag the timeline to the current month and read the headline numbers.</li><li>Check sessions needing action for next cycle's workload.</li><li>Scan the heatmap for a group with unusual referral rates.</li></ol></div>
+        <div class="card"><h3>Nurse or health worker</h3><ol style="margin:0;padding-left:20px"><li>Open Live session scoring and select the participant.</li><li>Set each slider to the scores achieved, with mood and sleep.</li><li>Follow the Next step box.</li><li>Never present a result as a diagnosis.</li></ol></div>
+        <div class="card"><h3>Clinician</h3><ol style="margin:0;padding-left:20px"><li>Open the Clinician review queue; specialist cases come first.</li><li>Select a case to see its trajectory and reasons.</li><li>Approve, downgrade, escalate or ask for more information, with a note.</li><li>Check the participant's report on Participant journey.</li></ol></div>
+      </div>
+      <p class="small muted">Full methods, assumptions and limitations are in the <a href="#docs">technical documentation</a>, which you can read here, open as a standalone HTML page, or open as a PDF.</p>
+    </section>
+
+    <!-- Docs -->
+    <section class="view" id="v-docs">
+      <h1>Technical documentation</h1>
+      <p class="lead">The full technical documentation: method, architecture, statistics, triage rules, risk context, safety and data governance, validation results, assumptions, limitations and the path to a pilot.</p>
+      <div class="pagebar">
+        <a class="btn" href="docs/NeuroTrack_Technical_Documentation.html" target="_blank" rel="noopener">Open as a standalone HTML page</a>
+        <a class="btn ghost" href="docs/NeuroTrack_Technical_Documentation.pdf" target="_blank" rel="noopener">Open the PDF</a>
+      </div>
+      <div class="docview">
+        <nav class="toc card" id="doc-toc" aria-label="Contents"></nav>
+        <article class="card doc" id="doc-body"><p class="muted">Loading the documentation…</p></article>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+"use strict";
+const COL = { GREEN: "var(--green)", AMBER: "var(--amber)", AMBER_MOOD: "var(--orange)", RED_PC: "var(--red)", RED_URGENT: "var(--purple)", MISSED: "var(--muted)" };
+const ROUTES = ["overview", "dashboard", "journey", "entry", "try", "queue", "validation", "safety", "guide", "docs"];
+const DIG = ["Low", "Medium", "High"];
+const S = { lang: "en", pid: null, decisions: {}, metric: "false_referrals_per_100", consent: {} };
+let M, TX, PEOPLE, BYID, VISITS, BYPID, VAL, EXAMPLES;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const f2 = v => v == null ? "–" : Number(v).toFixed(2);
+const pct = v => v == null ? "–" : Math.round(v * 100) + "%";
+const cssv = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const colour = lvl => cssv((COL[lvl] || "var(--muted)").slice(4, -1));
+const li = () => (S.lang === "en" ? 0 : 1);
+const short = l => (TX.level_short[l] || [l, l]);
+
+function table(el, head, rows, opts) {
+  opts = opts || {};
+  const th = head.map(h => `<th class="${h.n ? "n" : ""}">${esc(h.t)}</th>`).join("");
+  const tb = rows.map((r, i) => `<tr${opts.click ? ` class="click${opts.sel === i ? " sel" : ""}" data-i="${i}" tabindex="0"` : ""}>` +
+    r.map((c, j) => `<td class="${head[j].n ? "n" : ""}">${c}</td>`).join("") + "</tr>").join("");
+  el.innerHTML = `<thead><tr>${th}</tr></thead><tbody>${tb}</tbody>`;
+  if (opts.click) el.querySelectorAll("tbody tr").forEach(tr => {
+    const go = () => opts.click(+tr.dataset.i);
+    tr.addEventListener("click", go);
+    tr.addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  });
+}
+const pill = l => `<span class="pill" style="--c:${COL[l] || "var(--muted)"}${l === "AMBER" ? ";color:#1b1b1b" : ""}">${esc(short(l)[0])}</span>`;
+
+function reasonText(code, lang) {
+  const i = lang === "ar" ? 1 : 0;
+  if (!code) return "";
+  if (code.startsWith("DOMAIN_DROP:")) {
+    const d = code.split(":")[1];
+    return (i ? "انخفاض أكبر من المتوقع في " : "Larger than expected drop in ") + M.domain_labels[lang][d];
+  }
+  return (TX.reasons[code] || [code, code])[i];
+}
+const reasons = (s, lang) => (s || "").split(";").filter(Boolean).map(c => reasonText(c, lang || "en")).join("; ");
+
+/* ---------- data loading ---------- */
+async function getJSON(p) { const r = await fetch(p); if (!r.ok) throw new Error(p + " " + r.status); return r.json(); }
+function rows(arr) { const cols = arr[0]; return arr.slice(1).map(r => { const o = {}; cols.forEach((c, i) => (o[c] = r[i])); return o; }); }
+
+async function init() {
+  try {
+    const [m, t, p, v, val] = await Promise.all(["data/model.json", "data/texts.json", "data/people.json", "data/visits.json", "data/validation.json"].map(getJSON));
+    M = m; TX = t; PEOPLE = rows(p); VISITS = rows(v); VAL = val;
+  } catch (e) {
+    $("loading").textContent = "The data files could not be loaded. Reload the page to try again. (" + e.message + ")";
+    return;
+  }
+  BYID = Object.fromEntries(PEOPLE.map(x => [x.pid, x]));
+  BYPID = {};
+  VISITS.forEach(x => (BYPID[x.pid] = BYPID[x.pid] || []).push(x));
+  for (const k of Object.keys(TX.consent)) S.consent[k] = true;
+  EXAMPLES = pickExamples();
+  S.pid = Object.values(EXAMPLES)[0];
+  try { const d = JSON.parse(localStorage.getItem("nt-decisions") || "{}"); S.decisions = d; } catch (e) { /* storage unavailable */ }
+  $("loading").remove();
+  buildOverview(); buildDashboard(); buildDocs(); buildPickers(); buildConsent(); buildEntryFields(); buildTry(); buildQueueControls(); buildValidation();
+  bindGlobal();
+  route();
+}
+
+function pickExamples() {
+  const ex = {};
+  const early = PEOPLE.filter(p => p.truth === 1 && p.ref_NT === 1 && p.ref_level === "RED_PC" && p.t_ref <= 2 && p.t_ref > 0.4)
+    .map(p => ({ p, lead: (p.t_B == null ? 3.5 : p.t_B) - p.t_ref })).sort((a, b) => b.lead - a.lead);
+  if (early.length) ex["Gradual decline caught early (one-off screen later or never)"] = early[0].p.pid;
+  const mood = VISITS.find(v => v.initial_level === "AMBER_MOOD" && v.level === "GREEN" && BYID[v.pid].truth === 0);
+  if (mood) ex["Low-mood dip, resolved on retest (no referral)"] = mood.pid;
+  const fa = PEOPLE.find(p => p.truth === 0 && p.ref_A === 1 && p.ref_NT === 0 && p.edu_band === "0-6 yrs");
+  if (fa) ex["Little schooling: false alarm on a fixed cut-off, stable here"] = fa.pid;
+  const rap = PEOPLE.find(p => p.truth === 1 && p.ref_level === "RED_URGENT" && p.rapid === 1);
+  if (rap) ex["Rapid decline: specialist fast-track"] = rap.pid;
+  const st = PEOPLE.find(p => p.truth === 0 && p.ref_NT === 0 && p.language === "Arabic");
+  if (st) ex["Stable, healthy ageing"] = st.pid;
+  return ex;
+}
+
+/* ---------- routing ---------- */
+function route() {
+  let r = (location.hash || "#overview").slice(1);
+  if (!ROUTES.includes(r)) r = "overview";
+  ROUTES.forEach(x => $("v-" + x).classList.toggle("on", x === r));
+  document.querySelectorAll("#nav a").forEach(a => {
+    if (a.getAttribute("href") === "#" + r) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  if (r === "dashboard") renderDashboard(); else stopPlay();
+  if (r === "journey") renderJourney();
+  if (r === "entry") renderEntryBase();
+  if (r === "queue") renderQueue();
+  if (r === "validation") renderValPlot();
+  if (r === "docs") loadDocs();
+}
+
+function bindGlobal() {
+  window.addEventListener("hashchange", route);
+  const setLang = l => {
+    S.lang = l;
+    $("lang-en").setAttribute("aria-pressed", l === "en"); $("lang-ar").setAttribute("aria-pressed", l === "ar");
+    route();
+  };
+  $("lang-en").onclick = () => setLang("en");
+  $("lang-ar").onclick = () => setLang("ar");
+  $("j-domains").onchange = renderJourney;
+  $("j-clin").onchange = renderReport;
+  $("j-visit").onchange = () => { renderReport(); renderRadar(); };
+}
+
+/* ---------- overview ---------- */
+function vrow(tbl, m) { return tbl.find(r => r.method === m); }
+function buildOverview() {
+  const o = VAL.overall, t = VAL.timeliness;
+  const nt = vrow(o, "NeuroTrack"), b = vrow(o, "One-off, adjusted norms (B)");
+  const tnt = vrow(t, "NeuroTrack"), tb = vrow(t, "One-off, adjusted norms (B)");
+  const tiles = [
+    ["People with real decline who were caught", pct(nt.sensitivity), `+${Math.round((nt.sensitivity - b.sensitivity) * 100)} points vs once-a-year screen`],
+    ["Healthy people correctly not referred", pct(nt.specificity), ""],
+    ["Healthy people wrongly referred, per 100 screened", nt.false_referrals_per_100.toFixed(1), ""],
+    ["Typical time to clinical assessment", tnt.median_time_to_clinical_assessment_months.toFixed(1) + " mo", `${(tb.median_time_to_clinical_assessment_months - tnt.median_time_to_clinical_assessment_months).toFixed(1)} months sooner`],
+  ];
+  $("ov-tiles").innerHTML = tiles.map(x => `<div class="tile"><span class="k">${x[0]}</span><span class="v">${x[1]}</span>${x[2] ? `<span class="d">${x[2]}</span>` : ""}</div>`).join("");
+  $("ov-levels").innerHTML = ["GREEN", "AMBER", "AMBER_MOOD", "RED_PC", "RED_URGENT"].map(l =>
+    `<div class="stripe" style="--c:${COL[l]}"><b>${esc(TX.level_short[l][0])}</b><div class="ar">${esc(TX.level_short[l][1])}</div></div>`).join("");
+}
+
+/* ---------- participant pickers (shared state) ---------- */
+function pickerHTML(key) {
+  const opts = Object.entries(EXAMPLES).map(([k, v]) => `<option value="${v}">${esc(k)}</option>`).join("");
+  return `<div class="field" style="flex:2 1 320px"><label for="${key}-ex">Example participant</label>
+    <select id="${key}-ex">${opts}<option value="">Choose by ID…</option></select></div>
+    <div class="field" style="flex:1 1 160px"><label for="${key}-id">Participant ID</label>
+    <input type="text" id="${key}-id" list="pid-list" autocomplete="off" spellcheck="false"></div>`;
+}
+function buildPickers() {
+  const dl = document.createElement("datalist"); dl.id = "pid-list";
+  dl.innerHTML = PEOPLE.map(p => `<option value="${p.pid}">`).join("");
+  document.body.appendChild(dl);
+  for (const key of ["pick-journey", "pick-entry"]) {
+    $(key).innerHTML = pickerHTML(key);
+    const ex = $(key + "-ex"), id = $(key + "-id");
+    ex.onchange = () => { if (ex.value) { S.pid = ex.value; syncPickers(); route(); } else id.focus(); };
+    id.onchange = () => { const v = id.value.trim().toUpperCase(); if (BYID[v]) { S.pid = v; syncPickers(); route(); } };
+  }
+  syncPickers();
+}
+function syncPickers() {
+  for (const key of ["pick-journey", "pick-entry"]) {
+    const ex = $(key + "-ex"), id = $(key + "-id");
+    const match = Object.values(EXAMPLES).includes(S.pid);
+    ex.value = match ? S.pid : "";
+    id.value = S.pid;
+  }
+}
+
+
+/* ---------- programme dashboard ---------- */
+let playTimer = null;
+const LVL_ORDER = ["GREEN", "AMBER", "AMBER_MOOD", "RED_PC", "RED_URGENT", "MISSED"];
+const LVL_NAME = { GREEN: "Stable", AMBER: "Repeat (unconfirmed)", AMBER_MOOD: "Wellbeing review", RED_PC: "Primary care review", RED_URGENT: "Specialist fast-track", MISSED: "Missed session" };
+const baseLayout = extra => Object.assign({
+  paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", margin: { l: 56, r: 16, t: 10, b: 50 },
+  font: { family: "IBM Plex Sans, sans-serif", color: cssv("--muted"), size: 12 }, legend: { orientation: "h", y: -0.2 },
+}, extra);
+const CFG = { displayModeBar: false, responsive: true };
+
+function buildDashboard() {
+  ["f-lang", "f-age", "f-edu", "f-dig"].forEach(id => ($(id).onchange = () => renderDashboard()));
+  $("d-month").addEventListener("input", () => { stopPlay(); renderDashboard(); });
+  $("d-play").onclick = () => (playTimer ? stopPlay() : startPlay());
+  $("d-thr").addEventListener("input", renderThreshold);
+}
+function startPlay() {
+  if (+$("d-month").value >= 36) $("d-month").value = 0;
+  $("d-play").textContent = "Pause"; $("d-dot").classList.add("on");
+  playTimer = setInterval(() => {
+    const m = +$("d-month").value + 1;
+    $("d-month").value = m; renderDashboard(true);
+    if (m >= 36) stopPlay();
+  }, 450);
+}
+function stopPlay() {
+  if (playTimer) clearInterval(playTimer);
+  playTimer = null; $("d-play").textContent = "Play"; $("d-dot").classList.remove("on");
+}
+function filtered() {
+  const L = $("f-lang").value, A = $("f-age").value, E = $("f-edu").value, D = $("f-dig").value;
+  return PEOPLE.filter(p => (!L || p.language === L) && (!A || p.age_band === A) && (!E || p.edu_band === E) && (D === "" || p.digital === +D));
+}
+function quant(arr, q) { const a = arr.slice().sort((x, y) => x - y); if (!a.length) return null; const i = (a.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i); return a[lo] + (a[hi] - a[lo]) * (i - lo); }
+
+function renderDashboard(anim) {
+  const month = +$("d-month").value, yrs = month / 12 + 1e-9;
+  $("d-when").textContent = `Month ${month} · ${(month / 12).toFixed(1)} years`;
+  const P = filtered(), ids = new Set(P.map(p => p.pid));
+  const V = VISITS.filter(v => ids.has(v.pid) && v.years <= yrs);
+  const done = V.filter(v => v.completed);
+  const fu = done.filter(v => v.session >= 2);
+  const refs = V.filter(v => v.first_referral === 1);
+  const truePos = refs.filter(v => BYID[v.pid].truth === 1).length;
+  const flags = fu.filter(v => v.initial_level === "AMBER" || v.initial_level === "AMBER_MOOD");
+  const resolved = flags.filter(v => v.level === "GREEN").length;
+  const sched = V.filter(v => v.session >= 2).length;
+  const kp = [
+    ["Enrolled", P.length.toLocaleString("en-US"), "people in this view"],
+    ["Sessions completed", done.length.toLocaleString("en-US"), sched ? `${Math.round(100 * fu.length / sched)}% of follow-ups attended` : "baseline only so far"],
+    ["First flags", flags.length, flags.length ? `${Math.round(100 * resolved / flags.length)}% resolved on retest` : "none yet"],
+    ["People referred", refs.length, `${P.length ? (100 * refs.length / P.length).toFixed(1) : 0} per 100 enrolled`],
+    ["Referrals that were true decliners", refs.length ? Math.round(100 * truePos / refs.length) + "%" : "–", "known only in simulation"],
+    ["Median change z, latest cycle", (() => { const last = Math.max(-1, ...fu.map(v => v.session)); const z = fu.filter(v => v.session === last).map(v => v.cz_composite); return z.length ? quant(z, 0.5).toFixed(2) : "–"; })(), "0 = as expected"],
+  ];
+  $("d-kpis").innerHTML = kp.map(k => `<div class="tile"><span class="k">${k[0]}</span><span class="v num">${k[1]}</span><span class="s">${k[2]}</span></div>`).join("");
+  drawMix(P, ids, yrs); drawFan(P, ids, yrs); drawSankey(fu); drawRiskCompare(P, yrs); drawHeat(yrs);
+  if (!anim) renderThreshold();
+}
+
+function drawMix(P, ids, yrs) {
+  const sessions = M.schedule.filter(([s]) => s >= 1).map(([s, t]) => ({ s, t }));
+  const xs = sessions.map(x => `S${x.s} · ${x.t < 0.1 ? "2 wk" : x.t.toFixed(1) + " y"}`);
+  const nSched = s => VISITS.filter(v => ids.has(v.pid) && v.session === s).length || 1;
+  const traces = ["RED_URGENT", "RED_PC", "AMBER_MOOD", "MISSED"].map(l => ({
+    type: "bar", name: LVL_NAME[l], x: xs,
+    y: sessions.map(x => x.t <= yrs ? +(100 * VISITS.filter(v => ids.has(v.pid) && v.session === x.s && (v.completed ? v.level : "MISSED") === l).length / nSched(x.s)).toFixed(1) : null),
+    marker: { color: colour(l), opacity: l === "MISSED" ? 0.45 : 0.9 },
+    hovertemplate: `%{x}<br>${LVL_NAME[l]}: %{y:.1f} per 100 sessions<extra></extra>`,
+  }));
+  Plotly.react("d-mix", traces, baseLayout({ height: 340, barmode: "stack", bargap: 0.35, transition: { duration: 300 },
+    yaxis: { title: "Per 100 scheduled sessions", range: [0, 22], gridcolor: cssv("--line") }, xaxis: { gridcolor: cssv("--line") },
+    legend: { orientation: "h", y: -0.22, font: { size: 11 } } }), CFG);
+}
+
+function drawFan(P, ids, yrs) {
+  const sess = M.schedule.filter(([s, t]) => s >= 2 && t <= yrs);
+  const x = sess.map(([, t]) => t);
+  const by = q => sess.map(([s]) => quant(VISITS.filter(v => ids.has(v.pid) && v.session === s && v.completed && v.cz_composite != null).map(v => v.cz_composite), q));
+  const med = truth => sess.map(([s]) => quant(VISITS.filter(v => ids.has(v.pid) && v.session === s && v.completed && BYID[v.pid].truth === truth).map(v => v.cz_composite), 0.5));
+  const acc = cssv("--accent");
+  const tr = x.length ? [
+    { x, y: by(0.05), mode: "lines", line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
+    { x, y: by(0.95), mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: acc + "22", name: "5th–95th percentile", hoverinfo: "skip" },
+    { x, y: by(0.25), mode: "lines", line: { width: 0 }, showlegend: false, hoverinfo: "skip" },
+    { x, y: by(0.75), mode: "lines", line: { width: 0 }, fill: "tonexty", fillcolor: acc + "44", name: "25th–75th percentile", hoverinfo: "skip" },
+    { x, y: med(0), mode: "lines+markers", name: "Median, stable people", line: { color: cssv("--ink"), width: 2.5 }, hovertemplate: "%{x:.1f} y · %{y:.2f}<extra>stable</extra>" },
+    { x, y: med(1), mode: "lines+markers", name: "Median, true decliners", line: { color: colour("RED_URGENT"), width: 2.5 }, hovertemplate: "%{x:.1f} y · %{y:.2f}<extra>decliners</extra>" },
+  ] : [];
+  Plotly.react("d-fan", tr, baseLayout({ height: 340,
+    xaxis: { title: "Years since enrolment", range: [0.35, 3.15], gridcolor: cssv("--line"), zeroline: false },
+    yaxis: { title: "Composite change z", range: [-4.5, 2.5], gridcolor: cssv("--line"), zeroline: false },
+    shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: -1.5, y1: -1.5, line: { color: colour("AMBER"), dash: "dash", width: 1.5 } }],
+    annotations: x.length ? [] : [{ text: "Follow-up starts at 6 months", xref: "paper", yref: "paper", x: 0.5, y: 0.5, showarrow: false, font: { size: 14, color: cssv("--muted") } }],
+    legend: { orientation: "h", y: -0.28, font: { size: 11 } } }), CFG);
+}
+
+function drawSankey(fu) {
+  const N = ["Sessions flagged", "Stable", "Repeat test", "Wellbeing review", "Marked drop", "Resolved on retest", "Primary care review", "Specialist fast-track"];
+  const NC = [cssv("--muted"), colour("GREEN"), colour("AMBER"), colour("AMBER_MOOD"), colour("RED_URGENT"), colour("GREEN"), colour("RED_PC"), colour("RED_URGENT")];
+  const c = (i, f) => fu.filter(v => v.initial_level === i && (f == null || v.level === f)).length;
+  const L = [[0, 2, c("AMBER")], [0, 3, c("AMBER_MOOD")], [0, 4, c("RED_URGENT")],
+    [2, 5, c("AMBER", "GREEN")], [2, 6, c("AMBER", "RED_PC")], [2, 7, c("AMBER", "RED_URGENT")],
+    [3, 5, c("AMBER_MOOD", "GREEN")], [3, 6, c("AMBER_MOOD", "RED_PC")], [3, 7, c("AMBER_MOOD", "RED_URGENT")], [4, 7, c("RED_URGENT")]].filter(l => l[2] > 0);
+  if (!L.length) { Plotly.purge("d-sankey"); $("d-sankey").innerHTML = `<p class="muted" style="padding:40px 0">No follow-up sessions yet. They start at month 6.</p>`; return; }
+  if ($("d-sankey").querySelector("p")) $("d-sankey").innerHTML = "";
+  $("d-sankey-note").textContent = `${fu.length.toLocaleString("en-US")} follow-up sessions to date; ${c("GREEN").toLocaleString("en-US")} were stable and are not shown. Most first flags are resolved by the repeat test and never become referrals.`;
+  Plotly.react("d-sankey", [{ type: "sankey", arrangement: "snap",
+    node: { label: N.map((n, i) => n), color: NC, pad: 18, thickness: 14, line: { width: 0 } },
+    link: { source: L.map(l => l[0]), target: L.map(l => l[1]), value: L.map(l => l[2]), color: L.map(l => NC[l[1]] + "55"), hovertemplate: "%{source.label} → %{target.label}: %{value} sessions<extra></extra>" },
+  }], baseLayout({ height: 340, margin: { l: 10, r: 10, t: 10, b: 10 }, font: { family: "IBM Plex Sans, sans-serif", size: 12, color: cssv("--ink") } }), CFG);
+}
+
+function drawRiskCompare(P, yrs) {
+  const isRef = p => p.ref_NT === 1 && p.t_ref != null && p.t_ref <= yrs + 0.11;
+  const ref = P.filter(isRef), not = P.filter(p => !isRef(p));
+  const keys = Object.keys(TX.risk_factors).filter(k => k !== "excess_alcohol" && k !== "tbi");
+  const prev = (g, k) => g.length ? 100 * g.filter(p => p[k] === 1).length / g.length : 0;
+  const order = keys.map(k => ({ k, d: prev(ref, k) - prev(not, k) })).sort((a, b) => a.d - b.d).map(o => o.k);
+  const names = order.map(k => TX.risk_factors[k][2]);
+  Plotly.react("d-risk", [
+    { type: "bar", orientation: "h", name: `Not referred (n = ${not.length})`, y: names, x: order.map(k => prev(not, k)), marker: { color: cssv("--muted") + "aa" }, hovertemplate: "%{y}: %{x:.0f}%<extra>not referred</extra>" },
+    { type: "bar", orientation: "h", name: `Referred (n = ${ref.length})`, y: names, x: order.map(k => prev(ref, k)), marker: { color: cssv("--accent") }, hovertemplate: "%{y}: %{x:.0f}%<extra>referred</extra>" },
+  ], baseLayout({ height: 360, barmode: "group", bargap: 0.25, margin: { l: 210, r: 16, t: 56, b: 44 }, legend: { orientation: "h", x: 0, xanchor: "left", y: 1.02, yanchor: "bottom", font: { size: 11 } },
+    xaxis: { title: "Prevalence (%)", ticksuffix: "%", gridcolor: cssv("--line"), range: [0, 100] }, yaxis: { tickfont: { color: cssv("--ink"), size: 11.5 } } }), CFG);
+}
+
+function drawHeat(yrs) {
+  const groups = [["language", "Arabic"], ["language", "English"], ["age_band", "50-64"], ["age_band", "65-74"], ["age_band", "75+"], ["edu_band", "0-6 yrs"], ["edu_band", "7-12 yrs"], ["edu_band", "13+ yrs"]];
+  const sess = M.schedule.filter(([s]) => s >= 1);
+  const z = groups.map(([k, g]) => {
+    const pp = new Set(PEOPLE.filter(p => p[k] === g).map(p => p.pid));
+    return sess.map(([s, t]) => t <= yrs + 1e-9 ? +(100 * VISITS.filter(v => pp.has(v.pid) && v.session === s && v.first_referral === 1).length / pp.size).toFixed(1) : null);
+  });
+  const lab = { language: "Language", age_band: "Age", edu_band: "Education" };
+  Plotly.react("d-heat", [{ type: "heatmap", z, x: sess.map(([s, t]) => `S${s} · ${t < 0.1 ? "2 wk" : t.toFixed(1) + " y"}`), y: groups.map(([k, g]) => `${lab[k]}: ${g}`),
+    colorscale: [[0, cssv("--surface")], [1, cssv("--accent")]], zmin: 0, zmax: 6, xgap: 3, ygap: 3,
+    text: z.map(r => r.map(v => v == null ? "" : v.toFixed(1))), texttemplate: "%{text}", hovertemplate: "%{y}, %{x}: %{z} per 100<extra></extra>",
+    colorbar: { title: { text: "per 100", side: "right" }, thickness: 10, outlinewidth: 0, tickfont: { color: cssv("--muted") } } }],
+    baseLayout({ height: 380, margin: { l: 140, r: 20, t: 10, b: 40 }, yaxis: { autorange: "reversed", tickfont: { color: cssv("--ink") } } }), CFG);
+}
+
+function renderThreshold() {
+  const t = +$("d-thr").value;
+  $("d-thr-o").textContent = t.toFixed(2).replace("-", "−");
+  const P = filtered();
+  const score = p => { const z = (BYPID[p.pid] || []).filter(v => v.session >= 2 && v.completed && v.cz_composite != null).map(v => v.cz_composite); return z.length ? Math.min(...z) : 0; };
+  const sc = P.map(p => ({ s: score(p), y: p.truth, nt: p.ref_NT }));
+  const pos = sc.filter(x => x.y === 1).length, neg = sc.length - pos;
+  const at = th => { const tp = sc.filter(x => x.y === 1 && x.s <= th).length, fp = sc.filter(x => x.y === 0 && x.s <= th).length; return { sens: pos ? tp / pos : 0, spec: neg ? 1 - fp / neg : 1, fp100: sc.length ? 100 * fp / sc.length : 0, ref100: sc.length ? 100 * (tp + fp) / sc.length : 0 }; };
+  const grid = []; for (let th = -6; th <= 1.5; th += 0.05) grid.push(th);
+  const roc = grid.map(at);
+  const cur = at(t);
+  const ntTP = sc.filter(x => x.y === 1 && x.nt === 1).length, ntFP = sc.filter(x => x.y === 0 && x.nt === 1).length;
+  const nt = { sens: pos ? ntTP / pos : 0, spec: neg ? 1 - ntFP / neg : 1, fp100: sc.length ? 100 * ntFP / sc.length : 0 };
+  Plotly.react("d-roc", [
+    { x: roc.map(r => 1 - r.spec), y: roc.map(r => r.sens), mode: "lines", name: "Single low score, any cut-off", line: { color: cssv("--muted"), width: 2 }, hoverinfo: "skip" },
+    { x: [0, 1], y: [0, 1], mode: "lines", line: { color: cssv("--line"), dash: "dot" }, showlegend: false, hoverinfo: "skip" },
+    { x: [1 - cur.spec], y: [cur.sens], mode: "markers", name: `Your cut-off (${t.toFixed(2)})`, marker: { size: 13, color: colour("AMBER"), line: { color: cssv("--surface"), width: 2 } }, hovertemplate: "sensitivity %{y:.0%}<br>false-positive rate %{x:.0%}<extra></extra>" },
+    { x: [1 - nt.spec], y: [nt.sens], mode: "markers", name: "NeuroTrack (confirmed change)", marker: { size: 16, symbol: "star", color: cssv("--accent"), line: { color: cssv("--surface"), width: 1.5 } }, hovertemplate: "sensitivity %{y:.0%}<br>false-positive rate %{x:.0%}<extra></extra>" },
+  ], baseLayout({ height: 340, xaxis: { title: "False-positive rate (1 − specificity)", range: [0, 1], tickformat: ".0%", gridcolor: cssv("--line"), zeroline: false },
+    yaxis: { title: "Sensitivity", range: [0, 1.02], tickformat: ".0%", gridcolor: cssv("--line"), zeroline: false }, legend: { orientation: "h", y: -0.3, font: { size: 11 } } }), CFG);
+  const tile = (k, a, b, fmt, better) => `<div class="tile"><span class="k">${k}</span><span class="v num">${fmt(a)}</span><span class="s">NeuroTrack: ${fmt(b)}${better ? "" : ""}</span></div>`;
+  const P100 = v => v.toFixed(1);
+  $("d-thr-stats").innerHTML = tile("Sensitivity", cur.sens, nt.sens, pct) + tile("Specificity", cur.spec, nt.spec, pct) + tile("False referrals / 100", cur.fp100, nt.fp100, P100)
+    + `<p class="small muted" style="grid-column:1/-1">With a single low score you must choose between missing decliners (strict cut-off) and referring many healthy people (loose cut-off). Confirming the change on a repeat test lets NeuroTrack sit above that curve. Population: ${sc.length} people, ${pos} true decliners.</p>`;
+}
+
+
+/* ---------- documentation (HTML) ---------- */
+let docsLoaded = false;
+async function buildDocs() { /* loaded on first visit to keep start-up fast */ }
+async function loadDocs() {
+  if (docsLoaded) return;
+  docsLoaded = true;
+  try {
+    const r = await fetch("docs/content.html");
+    if (!r.ok) throw new Error(r.status);
+    $("doc-body").innerHTML = await r.text();
+  } catch (e) {
+    docsLoaded = false;
+    $("doc-body").innerHTML = `<p>The documentation could not be loaded. Use the PDF button above, or reload the page to try again.</p>`;
+    return;
+  }
+  $("doc-body").querySelectorAll("a[href^='http']").forEach(a => { a.target = "_blank"; a.rel = "noopener"; });
+  const hs = [...$("doc-body").querySelectorAll("h2")];
+  $("doc-toc").innerHTML = `<h3 style="padding:4px 8px">Contents</h3>` + hs.map((h, i) => `<button type="button" data-i="${i}">${esc(h.textContent)}<span>${i + 1}</span></button>`).join("");
+  $("doc-toc").querySelectorAll("button").forEach(btn => (btn.onclick = () => hs[+btn.dataset.i].scrollIntoView({ behavior: "smooth", block: "start" })));
+  if ("IntersectionObserver" in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => {
+      if (e.isIntersecting) { const i = hs.indexOf(e.target); $("doc-toc").querySelectorAll("button").forEach(b => b.classList.toggle("on", +b.dataset.i === i)); }
+    }), { rootMargin: "0px 0px -70% 0px" });
+    hs.forEach(h => io.observe(h));
+  }
+}
+
+/* ---------- journey ---------- */
+function buildConsent() {
+  $("j-consent").innerHTML = Object.entries(TX.consent).map(([k, v]) =>
+    `<label><input type="checkbox" id="c-${k}" checked> ${esc(v[0])}</label>`).join("");
+  Object.keys(TX.consent).forEach(k => ($("c-" + k).onchange = e => { S.consent[k] = e.target.checked; renderReport(); renderRisk(); }));
+}
+
+function renderJourney() {
+  const p = BYID[S.pid], pv = BYPID[S.pid];
+  $("j-profile").innerHTML = [
+    ["ID", p.pid], ["Age at enrolment", Math.round(p.age0)], ["Language", p.language], ["Education", p.edu_band],
+    ["Digital familiarity", DIG[p.digital]], ["Accommodation", p.accommodation ? "Assisted / audio mode" : "None needed"],
+  ].map(([k, v]) => `<span class="chip">${k}: <b>${esc(v)}</b></span>`).join("");
+  drawTrajectory("j-plot", pv, $("j-domains").checked);
+  table($("j-table"), [{ t: "Session" }, { t: "Years", n: 1 }, { t: "Result" }, { t: "Change z", n: 1 }, { t: "Retest z", n: 1 }, { t: "Why flagged" }, { t: "Retest findings" }, { t: "PHQ-9", n: 1 }, { t: "Sleep h", n: 1 }],
+    pv.map(v => [v.session, v.years.toFixed(2), v.completed ? pill(v.level) : pill("MISSED"), f2(v.cz_composite), f2(v.retest_composite),
+      esc(reasons(v.reasons)), esc(reasons(v.retest_reasons)), v.phq9 == null ? "–" : v.phq9, v.sleep_last_night == null ? "–" : v.sleep_last_night]));
+  const done = pv.filter(v => v.completed);
+  const sched = Object.fromEntries(M.schedule);
+  $("j-visit").innerHTML = done.map(v => `<option value="${v.session}">Session ${v.session} (${sched[v.session].toFixed(1)} y) · ${esc(short(v.level)[0])}</option>`).join("");
+  $("j-visit").value = done[done.length - 1].session;
+  renderReport(); renderRisk(); renderRadar();
+}
+
+function renderRadar() {
+  const v = BYPID[S.pid].find(x => x.session === +$("j-visit").value);
+  const el = $("j-radar");
+  if (!v || v.cz_memory == null) { Plotly.purge(el); el.innerHTML = `<p class="muted small">Change scores start at the first follow-up (session 2). Baseline sessions show the person's starting point.</p>`; return; }
+  if (el.querySelector("p")) el.innerHTML = "";
+  const th = M.domains.map(d => M.domain_labels.en[d].split(" (")[0]);
+  const close = a => a.concat([a[0]]);
+  const val = M.domains.map(d => v["cz_" + d]);
+  const lo = Math.min(-4, ...val.map(x => x - 0.5));
+  Plotly.react(el, [
+    { type: "scatterpolar", r: close(M.domains.map(() => 0)), theta: close(th), mode: "lines", name: "Expected (0)", line: { color: cssv("--green"), dash: "dot" }, hoverinfo: "skip" },
+    { type: "scatterpolar", r: close(M.domains.map(() => M.thresholds.domain_flag)), theta: close(th), mode: "lines", name: "Domain flag (−1.96)", line: { color: colour("RED_PC"), dash: "dash" }, hoverinfo: "skip" },
+    { type: "scatterpolar", r: close(val), theta: close(th), fill: "toself", name: "This visit", line: { color: cssv("--accent"), width: 2.5 }, fillcolor: cssv("--accent") + "33", hovertemplate: "%{theta}: z = %{r:.2f}<extra></extra>" },
+  ], {
+    height: 300, margin: { l: 40, r: 40, t: 20, b: 20 }, paper_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "IBM Plex Sans, sans-serif", color: cssv("--muted"), size: 11.5 },
+    polar: { bgcolor: "rgba(0,0,0,0)", radialaxis: { range: [lo, 2.5], gridcolor: cssv("--line"), tickfont: { size: 10 } }, angularaxis: { gridcolor: cssv("--line"), tickfont: { color: cssv("--ink"), size: 12 } } },
+    legend: { orientation: "h", y: -0.1 }, showlegend: true,
+  }, { displayModeBar: false, responsive: true });
+}
+
+function drawTrajectory(el, pv, domains) {
+  const fu = pv.filter(v => v.session >= 2 && v.completed);
+  const ink = cssv("--ink"), muted = cssv("--muted"), line = cssv("--line");
+  const tr = [];
+  if (domains) {
+    const dc = ["#7aa6c2", "#b38fc4", "#c9a35f", "#8fb88a"];
+    M.domains.forEach((d, i) => tr.push({ x: fu.map(v => v.years), y: fu.map(v => v["cz_" + d]), name: M.domain_labels.en[d].split(" (")[0], mode: "lines+markers", line: { width: 1.5, color: dc[i] }, marker: { size: 5 }, hovertemplate: "%{y:.2f}<extra>%{fullData.name}</extra>" }));
+  }
+  tr.push({ x: fu.map(v => v.years), y: fu.map(v => v.cz_composite), name: "Composite change", mode: "lines", line: { color: ink, width: 3 }, hoverinfo: "skip" });
+  tr.push({ x: fu.map(v => v.years), y: fu.map(v => v.cz_composite), mode: "markers", showlegend: false,
+    marker: { size: 14, color: fu.map(v => colour(v.level)), line: { color: cssv("--surface"), width: 2 } },
+    text: fu.map(v => short(v.level)[0]), hovertemplate: "Year %{x:.1f} · z = %{y:.2f}<br>%{text}<extra></extra>" });
+  const rt = fu.filter(v => v.retest_composite != null);
+  if (rt.length) tr.push({ x: rt.map(v => v.retest_years), y: rt.map(v => v.retest_composite), name: "Confirmatory retest", mode: "markers",
+    marker: { size: 11, symbol: "circle-open", color: ink, line: { width: 2 } }, hovertemplate: "Retest · z = %{y:.2f}<extra></extra>" });
+  const ymin = Math.min(-4, ...fu.map(v => v.cz_composite).filter(x => x != null).map(x => x - 0.5), ...rt.map(v => v.retest_composite - 0.5));
+  const T = M.thresholds;
+  Plotly.react(el, tr, {
+    margin: { l: 50, r: 16, t: 10, b: 50 }, height: 360, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "IBM Plex Sans, sans-serif", color: muted, size: 12 },
+    xaxis: { title: "Years since enrolment", gridcolor: line, zeroline: false, range: [0.3, 3.2] },
+    yaxis: { title: "Change vs expected (z)", gridcolor: line, zeroline: false, range: [ymin, 3] },
+    legend: { orientation: "h", y: -0.22 },
+    shapes: [
+      { type: "rect", xref: "paper", x0: 0, x1: 1, y0: T.composite_flag, y1: 3, fillcolor: colour("GREEN"), opacity: 0.06, line: { width: 0 }, layer: "below" },
+      { type: "line", xref: "paper", x0: 0, x1: 1, y0: T.composite_flag, y1: T.composite_flag, line: { color: colour("AMBER"), dash: "dash", width: 1.5 } },
+      { type: "line", xref: "paper", x0: 0, x1: 1, y0: T.composite_severe, y1: T.composite_severe, line: { color: colour("RED_URGENT"), dash: "dot", width: 1.5 } },
+    ],
+    annotations: [
+      { xref: "paper", x: 0.01, y: T.composite_flag, yshift: -10, text: "Possible change (−1.5)", showarrow: false, xanchor: "left", font: { size: 11, color: muted } },
+      { xref: "paper", x: 0.01, y: T.composite_severe, yshift: -10, text: "Marked change (−3.0)", showarrow: false, xanchor: "left", font: { size: 11, color: muted } },
+    ],
+  }, { displayModeBar: false, responsive: true });
+}
+
+function riskProfile(p, consent) {
+  const allowed = new Set(["demographic", ...Object.keys(consent).filter(k => consent[k])]);
+  const out = [];
+  for (const [k, v] of Object.entries(TX.risk_factors)) {
+    const [paf, cat, en, ar, aen, aar] = v;
+    if (allowed.has(cat) && p[k] === 1) out.push({ k, w: paf, src: "Lancet 2024 PAF", en, ar, aen, aar });
+  }
+  if (consent.wearable && p.sleep_hours_avg < 6) {
+    const [cat, en, ar, aen, aar] = TX.extra.short_sleep;
+    out.push({ k: "short_sleep", w: 2, src: "Emerging evidence", en, ar, aen, aar });
+  }
+  return out.sort((a, b) => b.w - a.w);
+}
+
+function genomic(p, consent, lang) {
+  if (!consent.family_genomic) return null;
+  const ar = lang === "ar", parts = [];
+  if (p.family_history === 1) parts.push(ar ? "يوجد تاريخ عائلي للخرف." : "Family history of dementia reported.");
+  if (p.apoe_tested === 1 && p.apoe4 === 1) parts.push(ar
+    ? "النتيجة الجينية: يحمل متغيّر APOE e4 الذي يرفع الخطر الوراثي لكنه لا يعني حتمية الإصابة بالخرف، بل يجعل معالجة العوامل القابلة للتعديل أكثر أهمية. تتوفّر استشارة وراثية."
+    : "Genomic result: carries an APOE e4 variant, which raises inherited risk but does NOT mean dementia will develop. It makes acting on modifiable factors more worthwhile. Genetic counselling is offered.");
+  else if (p.apoe_tested === 1) parts.push(ar ? "النتيجة الجينية: لم يُعثر على متغيّر APOE e4." : "Genomic result: no APOE e4 variant found.");
+  if (parts.length) parts.push(ar ? "المعلومات الجينية والعائلية لا تؤدي وحدها إلى أي تحويل." : "Genomic and family information never triggers a referral on its own.");
+  return parts.length ? parts.join(" ") : null;
+}
+
+const needsReview = l => ["RED_PC", "RED_URGENT", "AMBER_MOOD"].includes(l);
+
+function reportHTML(p, v, lang) {
+  const i = lang === "ar" ? 1 : 0, ar = i === 1;
+  const comp = v.retest_composite != null ? v.retest_composite : v.cz_composite;
+  let h = `<div class="head">${esc(short(v.level)[i])}</div><p>${esc(TX.level_text[v.level][i])}</p>`;
+  if (comp != null && comp < -1) {
+    const n = NT.healthyRarity(comp);
+    h += `<p>${ar ? `نحو ${n} من كل 100 شخص ذوي صحة دماغية مستقرة قد يُظهرون تغيّراً بهذا الحجم، ولهذا نتأكّد قبل اتخاذ أي إجراء.` : `About ${n} in 100 people whose brain health is stable would show a change this large. That is why we confirm before acting.`}</p>`;
+  }
+  const rp = riskProfile(p, S.consent).slice(0, 3);
+  if (rp.length) h += `<div><b>${ar ? "أهم الإجراءات لصحة دماغك" : "Your top brain-health actions"}</b><ul>${rp.map(r => `<li><b>${esc(ar ? r.ar : r.en)}</b> – ${esc(ar ? r.aar : r.aen)}</li>`).join("")}</ul></div>`;
+  if (needsReview(v.level)) h += `<div><b>${ar ? "قد يفحص طبيبك الأسباب القابلة للعلاج:" : "Your doctor may check for treatable causes:"}</b> ${TX.checks.map(c => esc(c[i])).join(" · ")}</div>`;
+  const g = genomic(p, S.consent, lang);
+  if (g) h += `<p>${esc(g)}</p>`;
+  h += `<p class="disc">${esc(TX.disclaimer[i])}</p>`;
+  return h;
+}
+
+function renderReport() {
+  if (!S.pid) return;
+  const p = BYID[S.pid], v = BYPID[S.pid].find(x => x.session === +$("j-visit").value);
+  if (!v) return;
+  const ar = S.lang === "ar";
+  $("j-report-title").textContent = ar ? "التقرير" : "Report";
+  const key = S.pid + ":" + v.session, dec = S.decisions[key];
+  const held = needsReview(v.level) && !dec && !$("j-clin").checked;
+  let h = "";
+  if (dec) h += `<div class="ok small">Clinician decision: ${esc(dec.decision)}${dec.note ? " · note: " + esc(dec.note) : ""}</div>`;
+  if (held) h += `<div class="held" dir="${ar ? "rtl" : "ltr"}">${ar ? "هذه النتيجة بانتظار مراجعة الطبيب قبل إرسالها إليك." : "This result is waiting for clinician review before it is released to the participant."}</div>`;
+  else h += `<div class="report" dir="${ar ? "rtl" : "ltr"}" lang="${ar ? "ar" : "en"}">${reportHTML(p, v, S.lang)}</div>`;
+  $("j-report").innerHTML = h;
+}
+
+function renderRisk() {
+  const p = BYID[S.pid], c = S.consent;
+  const rp = riskProfile(p, c);
+  const g = genomic(p, c, "en");
+  $("j-risk").innerHTML = `
+    <div><h3>Clinical and metabolic</h3>${c.clinical ? `<p class="num">Systolic BP <b>${p.sbp}</b> mmHg · HbA1c <b>${p.hba1c}%</b> · BMI <b>${p.bmi}</b> · LDL <b>${p.ldl}</b> mmol/L</p>` : `<p class="muted">Not shared</p>`}
+      <h3 style="margin-top:10px">Wearable, 30-day average</h3>${c.wearable ? `<p class="num">Sleep <b>${p.sleep_hours_avg} h</b> a night · <b>${Math.round(p.steps_avg).toLocaleString("en-US")}</b> steps a day</p>` : `<p class="muted">Not shared</p>`}</div>
+    <div><h3>Modifiable factors, ranked by population impact</h3>${rp.length ? `<table><thead><tr><th>Factor</th><th class="n">PAF %</th><th>Source</th></tr></thead><tbody>${rp.map(r => `<tr><td>${esc(r.en)}</td><td class="n">${r.w}</td><td class="muted">${r.src}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">No modifiable factors found in the shared data.</p>`}</div>
+    <div><h3>Family history and genomics</h3><p>${g ? esc(g) : `<span class="muted">Not shared, or nothing reported.</span>`}</p></div>`;
+}
+
+/* ---------- entry ---------- */
+const SLIDERS = () => M.domains.map(d => ({ id: d, label: M.domain_labels.en[d], unit: M.raw_scales[d].unit, min: M.raw_scales[d].min, max: d === "executive" ? 180 : M.raw_scales[d].max, step: 1 }))
+  .concat([{ id: "faq", label: "Daily-function difficulty", unit: "0–30, higher is worse", min: 0, max: 30, step: 1 },
+           { id: "phq", label: "PHQ-9 mood score", unit: "0–27, 10+ is moderate", min: 0, max: 27, step: 1 },
+           { id: "sleep", label: "Sleep last night", unit: "hours", min: 0, max: 12, step: 0.5 },
+           { id: "years", label: "Years since enrolment", unit: "time of this session", min: 0.5, max: 6, step: 0.1 }]);
+function buildEntryFields() {
+  $("e-sliders").innerHTML = SLIDERS().map(x => `<div class="sl"><label for="e-${x.id}">${esc(x.label)}<small>${esc(x.unit)}</small></label>
+    <input type="range" id="e-${x.id}" min="${x.min}" max="${x.max}" step="${x.step}"><output id="e-${x.id}-o" for="e-${x.id}"></output></div>`).join("");
+  SLIDERS().forEach(x => $("e-" + x.id).addEventListener("input", liveScore));
+  $("e-form").addEventListener("submit", e => e.preventDefault());
+  $("e-reset").onclick = () => { renderEntryBase(); };
+  $("e-mood").onclick = () => { $("e-phq").value = 15; $("e-sleep").value = 4; M.domains.forEach(d => { const b = baseOf(S.pid)[d], sd = M.raw_scales[d].sd * 0.6; $("e-" + d).value = Math.round(M.raw_scales[d].higher_is_better ? b - sd : b + sd); }); liveScore(); };
+  $("e-decline").onclick = () => { $("e-phq").value = 3; $("e-sleep").value = 7; M.domains.forEach(d => { const b = baseOf(S.pid)[d], sd = M.raw_scales[d].sd * (d === "memory" ? 1.6 : 1.0); $("e-" + d).value = Math.round(M.raw_scales[d].higher_is_better ? b - sd : b + sd); }); $("e-faq").value = Math.round(baseOf(S.pid).faq + 4); liveScore(); };
+}
+let liveRAF = null;
+function liveScore() { if (liveRAF) cancelAnimationFrame(liveRAF); liveRAF = requestAnimationFrame(scoreEntry); }
+function baseOf(pid) {
+  const b = BYPID[pid].filter(v => v.session <= 1), o = {};
+  for (const d of M.domains.concat(["faq"])) o[d] = b.reduce((s, v) => s + v[d], 0) / b.length;
+  return o;
+}
+function renderEntryBase() {
+  const b = baseOf(S.pid);
+  $("e-base").textContent = "Baseline (mean of 2 sessions): " + M.domains.map(d => `${M.domain_labels.en[d].split(" (")[0]} ${b[d].toFixed(1)} ${M.raw_scales[d].unit}`).join(" · ") + ` · daily-function difficulty ${b.faq.toFixed(1)}`;
+  M.domains.forEach(d => ($("e-" + d).value = Math.round(b[d])));
+  $("e-faq").value = Math.round(b.faq); $("e-phq").value = 3; $("e-sleep").value = 7; $("e-years").value = 3.5;
+  scoreEntry();
+}
+function scoreEntry() {
+  const p = BYID[S.pid], b = baseOf(S.pid);
+  SLIDERS().forEach(x => ($("e-" + x.id + "-o").textContent = (+$("e-" + x.id).value).toFixed(x.step < 1 ? 1 : 0)));
+  const raw = {}; M.domains.forEach(d => (raw[d] = +$("e-" + d).value));
+  const faq = +$("e-faq").value, phq = +$("e-phq").value, sleep = +$("e-sleep").value, years = +$("e-years").value;
+  const prior = BYPID[S.pid].filter(v => v.session >= 2 && v.completed);
+  const cz = NT.changeZ(M, p, raw, b, 7, years), nz = NT.normZ(M, p, raw);
+  const slope = NT.personalSlope(M, prior.map(v => v.years).concat([years]), prior.map(v => v.cz_composite).concat([cz.composite]));
+  const a = NT.assess(M, cz, faq - b.faq, phq, sleep, slope), lvl = NT.initialLevel(a);
+  const next = { GREEN: "Routine reassessment in 6–12 months.", AMBER: "Book a confirmatory repeat in 2–4 weeks. Nothing is sent to the participant as a diagnosis.",
+    AMBER_MOOD: "Offer a mental-health or sleep review now, and repeat the cognitive check in 4–6 weeks. The clinician is notified.",
+    RED_URGENT: "Held for clinician review today; specialist fast-track within 2 weeks if confirmed.", RED_PC: "Primary-care review within 4 weeks." }[lvl];
+  if (!$("e-plot")) $("e-out").innerHTML = `<div class="card"><div id="e-res"></div><div id="e-gauge" class="plot" style="min-height:220px" role="img" aria-label="Composite change gauge"></div><div id="e-plot" class="plot" style="min-height:260px" role="img" aria-label="Change z by domain"></div><div id="e-why"></div></div>`;
+  $("e-res").innerHTML = `<div class="result num" style="--c:${COL[lvl]}"><b>${esc(short(lvl)[0])}</b> · composite change z = ${cz.composite.toFixed(2)} <span class="muted small">(about ${NT.healthyRarity(cz.composite)} in 100 people with stable brain health would score this low or lower)</span></div>`;
+  $("e-why").innerHTML = `<p><b>Why:</b> ${a.reasons.length ? esc(a.reasons.map(r => reasonText(r, "en")).join("; ")) : "No thresholds crossed."}</p>
+    <p class="held"><b>Next step:</b> ${esc(next)}</p>
+    <p class="small muted num">Compared with people like them today: composite z = ${nz.composite.toFixed(2)}.${slope != null ? ` Personal slope: ${slope.toFixed(2)} z per year.` : ""}</p>`;
+  Plotly.react("e-gauge", [{ type: "indicator", mode: "gauge+number", value: cz.composite, number: { valueformat: ".2f", font: { color: cssv("--ink"), size: 34 } },
+    gauge: { axis: { range: [-5, 2], tickvals: [-5, -4, -3, -2, -1, 0, 1, 2], ticktext: ["−5", "−4", "−3", "−2", "−1", "0", "1", "2"], tickcolor: cssv("--muted"), tickfont: { color: cssv("--muted") } }, bar: { color: colour(lvl), thickness: 0.3 }, bgcolor: "rgba(0,0,0,0)", borderwidth: 0,
+      steps: [{ range: [-5, -3], color: colour("RED_URGENT") + "33" }, { range: [-3, -1.5], color: colour("AMBER") + "33" }, { range: [-1.5, 2], color: colour("GREEN") + "26" }],
+      threshold: { line: { color: cssv("--ink"), width: 2 }, thickness: 0.8, value: -1.5 } }, title: { text: "Composite change z", font: { size: 13, color: cssv("--muted") } } }],
+    { height: 220, margin: { l: 30, r: 30, t: 40, b: 10 }, paper_bgcolor: "rgba(0,0,0,0)", font: { family: "IBM Plex Sans, sans-serif" } }, { displayModeBar: false, responsive: true });
+  const xs = ["Memory", "Speed", "Executive", "Fluency", "Composite"];
+  const ys = M.domains.map(d => cz[d]).concat([cz.composite]);
+  Plotly.react("e-plot", [{ type: "bar", x: xs, y: ys, marker: { color: ys.map((y, i) => i === 4 ? cssv("--ink") : (y <= M.thresholds.domain_flag ? colour("RED_PC") : cssv("--muted"))) }, text: ys.map(y => y.toFixed(2)), textposition: "outside", hoverinfo: "skip", cliponaxis: false }], {
+    height: 260, transition: { duration: 250, easing: "cubic-in-out" }, margin: { l: 50, r: 10, t: 20, b: 40 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "IBM Plex Sans, sans-serif", color: cssv("--muted"), size: 12 },
+    yaxis: { title: "Change vs expected (z)", gridcolor: cssv("--line"), zerolinecolor: cssv("--muted"), range: [Math.min(-4, ...ys) - 0.5, Math.max(2, ...ys) + 0.6] },
+    shapes: [{ type: "line", xref: "paper", x0: 0, x1: 1, y0: -1.5, y1: -1.5, line: { color: colour("AMBER"), dash: "dash" } },
+      { type: "line", xref: "paper", x0: 0, x1: 1, y0: M.thresholds.domain_flag_single, y1: M.thresholds.domain_flag_single, line: { color: colour("RED_PC"), dash: "dot" } }],
+  }, { displayModeBar: false, responsive: true });
+}
+
+/* ---------- try the tasks ---------- */
+const WORDS = { en: ["camel", "coffee", "falcon", "market", "desert", "pearl", "rice", "window"], ar: ["جمل", "قهوة", "صقر", "سوق", "صحراء", "لؤلؤ", "أرز", "نافذة"] };
+const LURES = { en: ["horse", "tea", "pigeon", "beach", "mountain", "gold", "bread", "door"], ar: ["حصان", "شاي", "حمامة", "شاطئ", "جبل", "ذهب", "خبز", "باب"] };
+const SYMS = ["◆", "▲", "●", "■", "★", "✚", "◐", "☾", "✦"];
+const ITEMS = [4, 0, 7, 2, 8, 5, 1, 6, 3, 0, 5, 2];
+let recallStage = 0, sdStart = null;
+function buildTry() { $("t-lang").onchange = () => { recallStage = 0; renderRecall(); }; renderRecall(); renderSD(); }
+function renderRecall() {
+  const L = $("t-lang").value, el = $("t-recall"), ar = L === "ar";
+  if (recallStage === 0) el.innerHTML = `<h2>Word recall</h2><p>You will see 8 words. Try to remember them.</p><div><button class="btn" id="r-go" type="button">Show the words</button></div>`;
+  if (recallStage === 1) el.innerHTML = `<h2>Word recall</h2><p class="task-words ${ar ? "ar" : ""}">${WORDS[L].join(" · ")}</p><div><button class="btn" id="r-go" type="button">I have memorised them</button></div>`;
+  if (recallStage === 2) el.innerHTML = `<h2>Word recall</h2><p>Quick distraction: count backwards from 50 in threes, in your head. Then continue.</p><div><button class="btn" id="r-go" type="button">Continue</button></div>`;
+  if (recallStage === 3) {
+    const opts = WORDS[L].concat(LURES[L]).map((w, i) => ({ w, k: (i * 7) % 16 })).sort((a, b) => a.k - b.k).map(o => o.w);
+    el.innerHTML = `<h2>Word recall</h2><p>Which words were on the list?</p><div class="opts ${ar ? "ar" : ""}">${opts.map((w, i) => `<label><input type="checkbox" id="rw-${i}" value="${esc(w)}"> ${esc(w)}</label>`).join("")}</div>
+      <div class="row"><button class="btn" id="r-score" type="button">Score my recall</button><button class="btn ghost" id="r-again" type="button">Start again</button></div><div id="r-out"></div>`;
+    $("r-score").onclick = () => {
+      const chosen = [...el.querySelectorAll("input:checked")].map(x => x.value);
+      const hits = chosen.filter(w => WORDS[L].includes(w)).length, fa = chosen.filter(w => LURES[L].includes(w)).length;
+      $("r-out").innerHTML = `<p class="ok">Correct: ${hits} of 8 · false alarms: ${fa} · score ${Math.max(0, hits - fa)}</p>`;
+    };
+    $("r-again").onclick = () => { recallStage = 0; renderRecall(); };
+    return;
+  }
+  $("r-go").onclick = () => { recallStage++; renderRecall(); };
+}
+function renderSD() {
+  $("t-sd").innerHTML = `<h2>Symbol–digit</h2><p><b>Key:</b> <span class="num">${SYMS.map((s, i) => `${s} = ${i + 1}`).join("&nbsp;&nbsp; ")}</span></p>
+    <p class="symbols" aria-label="Twelve symbols">${ITEMS.map(i => SYMS[i]).join("")}</p>
+    <div class="row"><div class="field" style="flex:1"><label for="sd-ans">Type the 12 digits in order</label><input type="text" id="sd-ans" inputmode="numeric" maxlength="12" autocomplete="off"></div>
+    <button class="btn" type="button" id="sd-go">Submit</button></div><p class="small muted">The timer starts when you click in the answer box.</p><div id="sd-out"></div>`;
+  $("sd-ans").addEventListener("focus", () => { if (!sdStart) sdStart = performance.now(); });
+  $("sd-go").onclick = () => {
+    const a = $("sd-ans").value, s = sdStart ? (performance.now() - sdStart) / 1000 : 0;
+    const correct = ITEMS.filter((it, i) => a[i] === String(it + 1)).length;
+    $("sd-out").innerHTML = `<p class="ok">${correct} of 12 correct in ${Math.round(s)} seconds.</p>`;
+    sdStart = null;
+  };
+}
+
+/* ---------- queue ---------- */
+let qSel = null;
+function buildQueueControls() {
+  const sched = Object.fromEntries(M.schedule);
+  $("q-session").innerHTML = [1, 2, 3, 4, 5, 6, 7].map(s => `<option value="${s}">Session ${s} · ${sched[s].toFixed(1)} years</option>`).join("");
+  $("q-session").value = 4;
+  $("q-session").onchange = () => { qSel = null; renderQueue(); };
+}
+function queueList() {
+  const s = +$("q-session").value, pr = { RED_URGENT: 0, RED_PC: 1, AMBER_MOOD: 2 };
+  return VISITS.filter(v => v.session === s && needsReview(v.level) && (v.first_referral === 1 || v.level === "AMBER_MOOD")).sort((a, b) => pr[a.level] - pr[b.level] || (a.cz_composite ?? 0) - (b.cz_composite ?? 0));
+}
+function renderQueue() {
+  const q = queueList(), s = +$("q-session").value;
+  $("q-count").textContent = q.length;
+  table($("q-table"), [{ t: "ID" }, { t: "Result" }, { t: "Age", n: 1 }, { t: "Language" }, { t: "Education" }, { t: "Change z", n: 1 }, { t: "Retest z", n: 1 }, { t: "Why flagged" }, { t: "Status" }],
+    q.map(v => { const p = BYID[v.pid], d = S.decisions[v.pid + ":" + s];
+      return [v.pid, pill(v.level), Math.round(p.age0), p.language, p.edu_band, f2(v.cz_composite), f2(v.retest_composite), esc(reasons(v.reasons)), d ? esc(d.decision.split(" ")[0]) : "Pending"]; }),
+    { click: i => { qSel = i; renderQueue(); }, sel: qSel });
+  const box = $("q-case");
+  if (qSel == null || !q[qSel]) { box.innerHTML = ""; renderLog(); return; }
+  const v = q[qSel], p = BYID[v.pid], z = v.retest_composite != null ? v.retest_composite : v.cz_composite;
+  box.innerHTML = `<div class="card"><h2>${esc(v.pid)} · trajectory to session ${s}</h2><div id="q-plot" class="plot" role="img" aria-label="Case trajectory"></div></div>
+    <div class="card"><div>${pill(v.level)} <span class="muted">${Math.round(p.age0)} y · ${esc(p.language)} · ${esc(p.edu_band)} · digital ${DIG[p.digital]}</span></div>
+    <p class="num">Composite change z = <b>${f2(z)}</b>: about <b>${NT.healthyRarity(z)} in 100</b> people with stable brain health would score this low.</p>
+    <p class="num">PHQ-9 ${v.phq9} · sleep ${v.sleep_last_night} h · daily-function difficulty ${v.faq}</p>
+    <p><b>Why:</b> ${esc(reasons(v.reasons))}${v.retest_reasons ? `<br><b>On retest:</b> ${esc(reasons(v.retest_reasons))}` : ""}</p>
+    <form id="q-form" class="field" style="gap:10px">
+      <fieldset style="border:0;padding:0;margin:0;display:flex;flex-direction:column;gap:6px"><legend class="small muted">Decision</legend>
+      ${["Approve recommendation and release report", "Downgrade to repeat assessment", "Escalate to specialist", "Request more information"].map((t, i) =>
+        `<label class="toggle"><input type="radio" name="qd" id="qd-${i}" value="${t}"${i === 0 ? " checked" : ""}> ${t}</label>`).join("")}</fieldset>
+      <div class="field"><label for="q-note">Clinical note</label><input type="text" id="q-note"></div>
+      <div><button class="btn" type="submit">Record decision</button></div><div id="q-msg"></div></form></div>`;
+  drawTrajectory("q-plot", BYPID[v.pid].filter(x => x.session <= s), true);
+  $("q-form").addEventListener("submit", e => {
+    e.preventDefault();
+    S.decisions[v.pid + ":" + s] = { decision: box.querySelector("input[name=qd]:checked").value, note: $("q-note").value.trim(), pid: v.pid, session: s };
+    try { localStorage.setItem("nt-decisions", JSON.stringify(S.decisions)); } catch (err) { /* storage unavailable */ }
+    renderQueue();
+    $("q-msg") && ($("q-msg").innerHTML = `<p class="ok">Decision recorded. The participant's report is now released.</p>`);
+  });
+  renderLog();
+}
+function renderLog() {
+  const d = Object.values(S.decisions);
+  $("q-log").hidden = !d.length;
+  if (d.length) table($("q-logt"), [{ t: "ID" }, { t: "Session", n: 1 }, { t: "Decision" }, { t: "Note" }], d.map(x => [esc(x.pid), x.session, esc(x.decision), esc(x.note)]));
+}
+
+/* ---------- validation ---------- */
+function buildValidation() {
+  table($("val-overall"), [{ t: "Method" }, { t: "Sensitivity", n: 1 }, { t: "Specificity", n: 1 }, { t: "PPV", n: 1 }, { t: "False referrals / 100", n: 1 }, { t: "All referrals / 100", n: 1 }],
+    VAL.overall.map(r => [r.method === "NeuroTrack" ? `<b>${r.method}</b>` : esc(r.method), pct(r.sensitivity), pct(r.specificity), pct(r.ppv), r.false_referrals_per_100.toFixed(1), r.referrals_per_100.toFixed(1)]));
+  table($("val-time"), [{ t: "Method" }, { t: "Decliners detected", n: 1 }, { t: "Median detection lag, months", n: 1 }, { t: "Referred before decline reached 0.5 SD", n: 1 }, { t: "Median time to clinical assessment, months", n: 1 }],
+    VAL.timeliness.map(r => [r.method === "NeuroTrack" ? `<b>${r.method}</b>` : esc(r.method), r.detected, r.median_detection_lag_months == null ? "–" : r.median_detection_lag_months.toFixed(1), r.detected_before_or_at_threshold_pct == null ? "–" : Math.round(r.detected_before_or_at_threshold_pct) + "%", r.median_time_to_clinical_assessment_months == null ? "–" : r.median_time_to_clinical_assessment_months.toFixed(1)]));
+  const lbl = k => k.replace("language=", "Language: ").replace("age_band=", "Age: ").replace("edu_band=", "Education: ");
+  table($("val-auc"), [{ t: "Group" }, { t: "AUC", n: 1 }], Object.entries(VAL.auc).map(([k, v]) => [esc(k === "overall" ? "Overall" : lbl(k)), v.toFixed(3)]));
+  table($("val-icc"), [{ t: "Measure" }, { t: "ICC", n: 1 }], Object.entries(VAL.icc).map(([k, v]) => [k[0].toUpperCase() + k.slice(1), v.toFixed(3)]));
+  table($("val-retest"), [{ t: "First flag" }, { t: "Flags", n: 1 }, { t: "Resolved on retest", n: 1 }],
+    VAL.retest.map(r => [esc(short(r.initial_level)[0]), r.initial_flags, Math.round(r.resolved_pct) + "%"]));
+  table($("val-comp"), [{ t: "Group" }, { t: "With assisted mode", n: 1 }, { t: "Without", n: 1 }],
+    VAL.completion.map(r => [esc(r.digital), pct(r.with_accommodation), pct(r.without_accommodation)]));
+  document.querySelectorAll("#v-validation .seg button").forEach(b => (b.onclick = () => {
+    S.metric = b.dataset.m;
+    document.querySelectorAll("#v-validation .seg button").forEach(x => x.setAttribute("aria-pressed", x === b));
+    renderValPlot();
+  }));
+}
+function renderValPlot() {
+  const m = S.metric, sg = VAL.subgroups;
+  const ORDER = ["Arabic", "English", "50-64", "65-74", "75+", "0-6 yrs", "7-12 yrs", "13+ yrs"];
+  const groups = [...new Map(sg.map(r => [r.dimension + "|" + r.group, r])).values()].sort((a, b) => ORDER.indexOf(a.group) - ORDER.indexOf(b.group));
+  const ylab = groups.map(g => `${g.dimension}: ${g.group}`).reverse();
+  const style = {
+    "NeuroTrack": { symbol: "circle", size: 13, color: cssv("--accent") },
+    "One-off, unadjusted (A)": { symbol: "circle-open", size: 11, color: cssv("--muted") },
+    "One-off, adjusted norms (B)": { symbol: "square", size: 10, color: cssv("--muted") },
+  };
+  const isPct = m !== "false_referrals_per_100";
+  const traces = Object.keys(style).map(meth => {
+    const rs = groups.map(g => sg.find(r => r.method === meth && r.dimension === g.dimension && r.group === g.group)).reverse();
+    return { type: "scatter", mode: "markers", name: meth, x: rs.map(r => r[m]), y: ylab, marker: { ...style[meth], opacity: meth === "One-off, adjusted norms (B)" ? 0.55 : 1, line: { width: 2, color: style[meth].color } },
+      hovertemplate: `%{y}<br>${meth}: ` + (isPct ? "%{x:.0%}" : "%{x:.1f} per 100") + "<extra></extra>" };
+  });
+  Plotly.react("val-plot", traces, {
+    height: 420, margin: { l: 150, r: 20, t: 10, b: 60 }, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "IBM Plex Sans, sans-serif", color: cssv("--muted"), size: 12 },
+    xaxis: { title: isPct ? (m === "sensitivity" ? "Share of true decliners referred" : "Share of healthy people not referred") : "False referrals per 100 screened, 3 years", tickformat: isPct ? ".0%" : "", range: isPct ? [0, 1.02] : [0, 18], gridcolor: cssv("--line"), zeroline: false },
+    yaxis: { gridcolor: cssv("--line"), tickfont: { color: cssv("--ink") } },
+    legend: { orientation: "h", y: -0.18 },
+  }, { displayModeBar: false, responsive: true });
+}
+
+init();
+})();
+</script>
+</body>
+</html>
